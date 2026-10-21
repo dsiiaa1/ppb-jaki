@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Pressable, SafeAreaView, ScrollView, Text, View } from "react-native";
+import { Text, View, useWindowDimensions } from "react-native";
 import { collection, onSnapshot } from "firebase/firestore";
 import styles from "../style/Style";
 import { db } from "../config/firebase";
 
-export default function Home({ userName, onOpenAlat, onLogout }) {
-  const [availableUnits, setAvailableUnits] = useState(null);
-  const [activeLoans, setActiveLoans] = useState(null);
+export default function Home({ userName }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 600;
+  const [toolCount, setToolCount] = useState(null);
+  const [availableStock, setAvailableStock] = useState(null);
+  const [borrowedUnits, setBorrowedUnits] = useState(null);
   const [summaryError, setSummaryError] = useState(false);
 
   useEffect(() => {
@@ -15,21 +18,32 @@ export default function Home({ userName, onOpenAlat, onLogout }) {
       (snapshot) => {
         const units = snapshot.docs.reduce((total, document) => {
           const data = document.data();
-          return total + Math.max(0, Number(data.stok ?? data.stock ?? 0));
+          const stock = Number(data.stok ?? data.stock ?? 0);
+          return total + (Number.isFinite(stock) ? Math.max(0, stock) : 0);
         }, 0);
-        setAvailableUnits(units);
+        setToolCount(snapshot.size);
+        setAvailableStock(units);
       },
       () => setSummaryError(true),
     );
     const unsubscribeLoans = onSnapshot(
       collection(db, "peminjaman"),
       (snapshot) => {
-        const count = snapshot.docs.filter((document) =>
-          ["dipinjam", "disetujui", "approved", "borrowed"].includes(
-            String(document.data().status || "").toLowerCase(),
-          ),
-        ).length;
-        setActiveLoans(count);
+        const units = snapshot.docs.reduce((total, document) => {
+          const data = document.data();
+          const status = String(data.status || "").trim().toLowerCase();
+          if (
+            !["dipinjam", "disetujui", "approved", "borrowed"].includes(status)
+          ) {
+            return total;
+          }
+
+          const quantity = Number(
+            data.jumlah ?? data.quantity ?? data.qty ?? 1,
+          );
+          return total + (Number.isFinite(quantity) ? Math.max(0, quantity) : 1);
+        }, 0);
+        setBorrowedUnits(units);
       },
       () => setSummaryError(true),
     );
@@ -40,68 +54,54 @@ export default function Home({ userName, onOpenAlat, onLogout }) {
     };
   }, []);
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.homeContainer}>
-        <View style={styles.homeHeader}>
-          <View>
-            <Text style={styles.eyebrow}>DASHBOARD</Text>
-            <Text style={styles.homeTitle}>Halo, {userName || "Pengguna"}</Text>
-          </View>
-          <Pressable onPress={onLogout} style={styles.textButton}>
-            <Text style={styles.textButtonText}>Keluar</Text>
-          </Pressable>
-        </View>
+  const totalUnits =
+    availableStock === null || borrowedUnits === null
+      ? null
+      : availableStock + borrowedUnits;
 
-        <View style={styles.welcomeCard}>
-          <Text style={styles.welcomeLabel}>PEMINJAMAN HARI INI</Text>
-          <Text style={styles.welcomeTitle}>
-            Temukan alat yang kamu butuhkan.
-          </Text>
-          <Text style={styles.welcomeText}>
-            Lihat ketersediaan alat dan ajukan peminjaman dalam beberapa
-            langkah.
-          </Text>
-          <Pressable style={styles.lightButton} onPress={onOpenAlat}>
-            <Text style={styles.lightButtonText}>Lihat daftar alat</Text>
-          </Pressable>
-        </View>
+  return (
+    <View style={styles.safeArea}>
+      <View style={styles.homeContainer}>
+        <Text style={styles.eyebrow}>DASHBOARD</Text>
+        <Text style={styles.homeTitle}>Selamat datang, Super Admin</Text>
+        <Text style={styles.homeSubtitle}>
+          {userName || "Kelola inventaris dan peminjaman."}
+        </Text>
 
         <Text style={styles.sectionTitle}>Ringkasan</Text>
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCard}>
+        <View style={[styles.summaryRow, compact && styles.summaryRowCompact]}>
+          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
             <Text style={styles.summaryValue}>
-              {availableUnits === null ? "--" : availableUnits}
+              {toolCount === null ? "--" : toolCount}
             </Text>
-            <Text style={styles.summaryLabel}>Unit tersedia</Text>
+            <Text style={styles.summaryLabel}>Jenis alat</Text>
           </View>
-          <View style={styles.summaryCard}>
+          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
             <Text style={styles.summaryValue}>
-              {activeLoans === null ? "--" : activeLoans}
+              {totalUnits === null ? "--" : totalUnits}
             </Text>
-            <Text style={styles.summaryLabel}>Sedang dipinjam</Text>
+            <Text style={styles.summaryLabel}>Total alat</Text>
+          </View>
+          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
+            <Text style={styles.summaryValue}>
+              {availableStock === null ? "--" : availableStock}
+            </Text>
+            <Text style={styles.summaryLabel}>Tersedia</Text>
+          </View>
+          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
+            <Text style={styles.summaryValue}>
+              {borrowedUnits === null ? "--" : borrowedUnits}
+            </Text>
+            <Text style={styles.summaryLabel}>Dipinjam</Text>
           </View>
         </View>
         {summaryError ? (
           <Text style={styles.summaryError}>
-            Ringkasan gagal dimuat. Periksa koneksi dan aturan Firestore.
+            Ringkasan gagal dimuat. Periksa koneksi dan akses Firestore.
           </Text>
         ) : null}
 
-        <Text style={styles.sectionTitle}>Cara menggunakan</Text>
-        <View style={styles.stepRow}>
-          <Text style={styles.stepNumber}>01</Text>
-          <Text style={styles.stepText}>Pilih alat yang tersedia.</Text>
-        </View>
-        <View style={styles.stepRow}>
-          <Text style={styles.stepNumber}>02</Text>
-          <Text style={styles.stepText}>Isi detail peminjaman.</Text>
-        </View>
-        <View style={styles.stepRow}>
-          <Text style={styles.stepNumber}>03</Text>
-          <Text style={styles.stepText}>Tunggu persetujuan petugas.</Text>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }

@@ -8,17 +8,23 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useState } from "react";
 import styles from "../../style/AlatStyle";
 
 export default function BorrowerFormModal({
   visible,
   onClose,
+  tools,
+  toolsLoading,
   form,
   onChange,
   error,
   submitting,
   onSave,
 }) {
+  const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
+  const selectedTool = tools.find((tool) => tool.id === form.alatId);
+
   return (
     <Modal
       transparent
@@ -82,6 +88,56 @@ export default function BorrowerFormModal({
               maxLength={60}
               autoCapitalize="words"
             />
+
+            <Text style={styles.inputLabel}>Nama Barang</Text>
+            <Pressable
+              onPress={() => setToolDropdownOpen((open) => !open)}
+              style={styles.dropdownButton}
+              disabled={toolsLoading || tools.length === 0}
+              accessibilityRole="button"
+              accessibilityLabel="Pilih nama barang"
+              accessibilityState={{ expanded: toolDropdownOpen }}
+            >
+              <Text
+                style={[
+                  styles.dropdownButtonText,
+                  !selectedTool && styles.dropdownPlaceholder,
+                ]}
+              >
+                {toolsLoading
+                  ? "Memuat daftar barang..."
+                  : selectedTool?.name || "Pilih nama barang"}
+              </Text>
+              <Text style={styles.dropdownArrow}>
+                {toolDropdownOpen ? "▲" : "▼"}
+              </Text>
+            </Pressable>
+            {toolDropdownOpen && tools.length > 0 ? (
+              <View style={styles.dropdownOptions}>
+                {tools.map((tool) => (
+                  <Pressable
+                    key={tool.id}
+                    onPress={() => {
+                      onChange("alat", tool.name);
+                      onChange("alatId", tool.id);
+                      setToolDropdownOpen(false);
+                    }}
+                    style={styles.dropdownOption}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.dropdownOptionText}>{tool.name}</Text>
+                    <Text style={styles.dropdownOptionDetail}>
+                      Stok: {tool.stock}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            {!toolsLoading && tools.length === 0 ? (
+              <Text style={styles.dropdownHelp}>
+                Belum ada barang di inventaris.
+              </Text>
+            ) : null}
 
             <Text style={styles.inputLabel}>Nomor telepon (opsional)</Text>
             <TextInput

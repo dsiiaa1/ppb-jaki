@@ -43,10 +43,10 @@ export default function Login({ onLogin }) {
           <View style={styles.brandMark}>
             <Text style={styles.brandMarkText}>PB</Text>
           </View>
-          <Text style={styles.eyebrow}>SISTEM PEMINJAMAN</Text>
-          <Text style={styles.loginTitle}>Selamat datang</Text>
+          <Text style={styles.eyebrow}>PANEL ADMIN</Text>
+          <Text style={styles.loginTitle}>Masuk Super Admin</Text>
           <Text style={styles.loginSubtitle}>
-            Kelola peminjaman alat dengan lebih mudah.
+            Masuk untuk mengelola inventaris dan peminjaman.
           </Text>
 
           <View style={styles.form}>
@@ -103,7 +103,7 @@ export default function Login({ onLogin }) {
             </Pressable>
           </View>
           <Text style={styles.helperText}>
-            Gunakan akun email yang terdaftar di Firebase untuk melanjutkan.
+            Masuk menggunakan akun Firebase untuk membuka panel.
           </Text>
         </View>
       </ScrollView>

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  SafeAreaView,
   ScrollView,
   Text,
   View,
@@ -12,6 +11,7 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
@@ -28,10 +28,12 @@ const emptyBorrowerForm = {
   name: "",
   identity: "",
   unit: "",
+  alat: "",
+  alatId: "",
   phone: "",
 };
 
-export default function Alat({ user, onLogout }) {
+export default function Alat() {
   const { width } = useWindowDimensions();
   const compact = width < 600;
   const [tools, setTools] = useState([]);
@@ -106,26 +108,77 @@ export default function Alat({ user, onLogout }) {
     const unit = borrowerForm.unit.trim();
     const phone = borrowerForm.phone.trim();
 
-    if (!name || !identity || !unit) {
-      setError("Nama, NIM/NIP, dan kelas atau unit wajib diisi.");
+    if (!name || !identity || !unit || !borrowerForm.alatId) {
+      setError("Nama, NIM/NIP, kelas atau unit, dan nama barang wajib diisi.");
+      return;
+    }
+
+    const selectedTool = tools.find((tool) => tool.id === borrowerForm.alatId);
+    if (!selectedTool) {
+      setError("Barang yang dipilih sudah tidak tersedia. Pilih barang kembali.");
       return;
     }
 
     setSubmitting(true);
     setError("");
     try {
-      await addDoc(collection(db, "peminjam"), {
-        nama: name,
-        identitas: identity,
-        unit,
-        telepon: phone,
-        dibuatPada: serverTimestamp(),
+      const borrowerRef = doc(collection(db, "peminjam"));
+      const loanRef = doc(collection(db, "peminjaman"));
+      const toolRef = doc(db, "alat", selectedTool.id);
+
+      await runTransaction(db, async (transaction) => {
+        const toolSnapshot = await transaction.get(toolRef);
+        if (!toolSnapshot.exists()) {
+          throw new Error("Barang tidak ditemukan di inventaris.");
+        }
+
+        const toolData = toolSnapshot.data();
+        const stockField = Object.hasOwn(toolData, "stok")
+          ? "stok"
+          : Object.hasOwn(toolData, "stock")
+            ? "stock"
+            : "stok";
+        const currentStock = Number(toolData[stockField] ?? 0);
+        if (!Number.isInteger(currentStock) || currentStock < 0) {
+          throw new Error("Stok barang tidak valid. Periksa data inventaris.");
+        }
+        if (currentStock < 1) {
+          throw new Error("Stok barang habis. Pilih barang lain.");
+        }
+
+        const timestamp = serverTimestamp();
+        const borrowerData = {
+          nama: name,
+          identitas: identity,
+          unit,
+          alat: selectedTool.name,
+          namaAlat: selectedTool.name,
+          alatId: selectedTool.id,
+          kodeAlat: selectedTool.code,
+          telepon: phone,
+          dibuatPada: timestamp,
+        };
+
+        transaction.update(toolRef, {
+          [stockField]: currentStock - 1,
+          diperbaruiPada: timestamp,
+        });
+        transaction.set(borrowerRef, borrowerData);
+        transaction.set(loanRef, {
+          ...borrowerData,
+          namaPeminjam: name,
+          jumlah: 1,
+          status: "dipinjam",
+          tanggalPinjam: timestamp,
+        });
       });
-      setNotice(`${name} berhasil ditambahkan sebagai peminjam.`);
+      setNotice(`${name} berhasil meminjam ${selectedTool.name}. Stok diperbarui.`);
       setBorrowerFormVisible(false);
-    } catch {
+    } catch (saveError) {
       setError(
-        "Data peminjam gagal disimpan. Periksa koneksi dan akses Firebase, lalu coba lagi.",
+        saveError instanceof Error && saveError.message
+          ? saveError.message
+          : "Peminjaman gagal disimpan. Periksa koneksi dan akses Firebase, lalu coba lagi.",
       );
     } finally {
       setSubmitting(false);
@@ -224,86 +277,62 @@ export default function Alat({ user, onLogout }) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.page}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.content}>
           <AlatHeader
-            onLogout={onLogout}
             onAdd={openCreateForm}
             onAddBorrower={openBorrowerForm}
             compact={compact}
           />
           <View
-            style={[
-              styles.dashboardGrid,
-              compact && styles.dashboardGridCompact,
-            ]}
+            style={[styles.summaryRow, compact && styles.summaryRowCompact]}
           >
+            <View style={styles.summaryBlock}>
+              <Text style={styles.summaryLabel}>JENIS ALAT</Text>
+              <Text style={styles.summaryValue}>
+                {loading ? "-" : tools.length}
+              </Text>
+            </View>
             <View
               style={[
-                styles.dashboardSidebar,
-                compact && styles.dashboardSidebarCompact,
+                styles.summaryDivider,
+                compact && styles.summaryDividerCompact,
               ]}
-            >
-              <View
-                style={[styles.summaryRow, compact && styles.summaryRowCompact]}
-              >
-                <View style={styles.summaryBlock}>
-                  <Text style={styles.summaryLabel}>JENIS ALAT</Text>
-                  <Text style={styles.summaryValue}>
-                    {loading ? "-" : tools.length}
-                  </Text>
-                </View>
-                <View
-                  style={[
-                    styles.summaryDivider,
-                    compact && styles.summaryDividerCompact,
-                  ]}
-                />
-                <View style={styles.summaryBlock}>
-                  <Text style={styles.summaryLabel}>TOTAL UNIT</Text>
-                  <Text style={styles.summaryValue}>
-                    {loading ? "-" : totalStock}
-                  </Text>
-                </View>
-                <View style={styles.summaryNote}>
-                  <Text style={styles.summaryNoteText}>Data inventaris</Text>
-                  <Text style={styles.summaryNoteSub}>tersinkron langsung</Text>
-                </View>
-              </View>
-            </View>
-            <View style={styles.dashboardMain}>
-              <AlatList
-                tools={tools}
-                filteredTools={filteredTools}
-                loading={loading}
-                error={error}
-                showError={Boolean(
-                  error &&
-                  !formVisible &&
-                  !borrowerFormVisible &&
-                  !deletingTool,
-                )}
-                search={search}
-                onSearchChange={setSearch}
-                notice={notice}
-                onDismissNotice={() => setNotice("")}
-                onAdd={openCreateForm}
-                onEdit={openEditForm}
-                onDelete={(tool) => {
-                  setError("");
-                  setDeletingTool(tool);
-                }}
-                compact={compact}
-              />
+            />
+            <View style={styles.summaryBlock}>
+              <Text style={styles.summaryLabel}>TOTAL UNIT</Text>
+              <Text style={styles.summaryValue}>
+                {loading ? "-" : totalStock}
+              </Text>
             </View>
           </View>
-          <Text style={styles.footerText}>
-            Masuk sebagai {user.displayName || user.email || "Super Admin"}
-          </Text>
+          <AlatList
+            tools={tools}
+            filteredTools={filteredTools}
+            loading={loading}
+            error={error}
+            showError={Boolean(
+              error &&
+              !formVisible &&
+              !borrowerFormVisible &&
+              !deletingTool,
+            )}
+            search={search}
+            onSearchChange={setSearch}
+            notice={notice}
+            onDismissNotice={() => setNotice("")}
+            onAdd={openCreateForm}
+            onEdit={openEditForm}
+            onDelete={(tool) => {
+              setError("");
+              setDeletingTool(tool);
+            }}
+            compact={compact}
+          />
         </View>
       </ScrollView>
 
@@ -323,6 +352,8 @@ export default function Alat({ user, onLogout }) {
       <BorrowerFormModal
         visible={borrowerFormVisible}
         onClose={() => setBorrowerFormVisible(false)}
+        tools={tools}
+        toolsLoading={loading}
         form={borrowerForm}
         onChange={(field, value) =>
           setBorrowerForm((current) => ({ ...current, [field]: value }))
@@ -339,6 +370,6 @@ export default function Alat({ user, onLogout }) {
         onClose={closeDeleteModal}
         onConfirm={removeTool}
       />
-    </SafeAreaView>
+    </View>
   );
 }
