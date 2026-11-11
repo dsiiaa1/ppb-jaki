@@ -17,14 +17,15 @@ import Login from "./screens/login";
 import Home from "./screens/Home";
 import Alat from "./screens/Alat";
 import Peminjaman from "./screens/Peminjaman";
+import Pengembalian from "./screens/Pengembalian";
 import { auth } from "./config/firebase";
 import drawerStyles from "./style/DrawerStyle";
 
 const adminPages = [
-  { key: "home", label: "Dashboard" },
-  { key: "alat", label: "Inventaris" },
-  { key: "aktif", label: "Peminjam Aktif" },
-  { key: "riwayat", label: "Riwayat Pengembalian" },
+  { key: "home", label: "Dashboard", icon: "📊", component: Home },
+  { key: "alat", label: "Data Alat", icon: "📦", component: Alat },
+  { key: "peminjaman", label: "Peminjaman", icon: "📥", component: Peminjaman },
+  { key: "pengembalian", label: "Pengembalian", icon: "📤", component: Pengembalian },
 ];
 
 export default function App() {
@@ -33,18 +34,18 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState("home");
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+
   const activePage =
-    adminPages.find((page) => page.key === activeScreen) || adminPages[0];
+    adminPages.find((p) => p.key === activeScreen) || adminPages[0];
+  const CurrentScreen = activePage.component;
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setDrawerVisible(false);
       setLogoutError("");
       setAuthLoading(false);
     });
-
-    return unsubscribe;
   }, []);
 
   const handleLogout = async () => {
@@ -56,70 +57,77 @@ export default function App() {
     }
   };
 
-  let content;
   if (authLoading) {
-    content = (
+    return (
       <View style={drawerStyles.loadingContainer}>
-        <ActivityIndicator color="#087E75" />
+        <ActivityIndicator color="#2563EB" size="large" />
       </View>
     );
-  } else if (!user) {
-    content = (
-      <Login
-        onLogin={(email, password) =>
-          signInWithEmailAndPassword(auth, email, password)
-        }
-      />
+  }
+
+  if (!user) {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <Login
+          onLogin={(email, password) =>
+            signInWithEmailAndPassword(auth, email, password)
+          }
+        />
+      </>
     );
-  } else {
-    content = (
-      <SafeAreaView style={drawerStyles.app}>
-        <View style={drawerStyles.appHeader}>
-          <Pressable
-            onPress={() => setDrawerVisible(true)}
-            style={drawerStyles.menuButton}
-            accessibilityRole="button"
-            accessibilityLabel="Buka navigasi"
-          >
-            <Text style={drawerStyles.menuButtonText}>☰</Text>
-          </Pressable>
-          <View style={drawerStyles.appHeaderText}>
-            <Text style={drawerStyles.appTitle}>
-              {activePage.label}
-            </Text>
-            <Text style={drawerStyles.appSubtitle} numberOfLines={1}>
-              {user.displayName || user.email}
-            </Text>
-          </View>
-        </View>
+  }
 
-        {logoutError ? (
-          <Text style={drawerStyles.logoutError}>{logoutError}</Text>
-        ) : null}
-        {activeScreen === "home" ? (
-          <Home userName={user.displayName || user.email} />
-        ) : activeScreen === "alat" ? (
-          <Alat />
-        ) : activeScreen === "aktif" ? (
-          <Peminjaman />
-        ) : null}
+  return (
+    <SafeAreaView style={drawerStyles.app}>
+      <StatusBar style="light" />
 
-        <Modal
-          visible={drawerVisible}
-          transparent
-          animationType="none"
-          onRequestClose={() => setDrawerVisible(false)}
+      {/* Navbar Top Bar */}
+      <View style={drawerStyles.appHeader}>
+        <Pressable
+          onPress={() => setDrawerVisible(true)}
+          style={drawerStyles.menuButton}
+          accessibilityRole="button"
+          accessibilityLabel="Buka menu navigasi"
         >
-          <View style={drawerStyles.drawerOverlay}>
-            <View style={drawerStyles.drawerPanel}>
-              <SafeAreaView style={drawerStyles.drawerContent}>
-                <View style={drawerStyles.drawerHeader}>
-                  <Text style={drawerStyles.drawerTitle}>Menu Admin</Text>
-                  <Text style={drawerStyles.drawerSubtitle}>
-                    {user.displayName || user.email}
-                  </Text>
-                </View>
-                {adminPages.map((page) => (
+          <Text style={drawerStyles.menuButtonText}>☰</Text>
+        </Pressable>
+
+        <View style={drawerStyles.appHeaderText}>
+          <Text style={drawerStyles.appTitle}>{activePage.label}</Text>
+        </View>
+      </View>
+
+      {logoutError ? (
+        <Text style={drawerStyles.logoutError}>{logoutError}</Text>
+      ) : null}
+
+      {/* Active Screen */}
+      <CurrentScreen
+        userName={user.displayName || user.email}
+        onNavigate={setActiveScreen}
+      />
+
+      {/* Navigation Drawer Modal */}
+      <Modal
+        visible={drawerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDrawerVisible(false)}
+      >
+        <View style={drawerStyles.drawerOverlay}>
+          <View style={drawerStyles.drawerPanel}>
+            <SafeAreaView style={drawerStyles.drawerContent}>
+              <View style={drawerStyles.drawerHeader}>
+                <Text style={drawerStyles.drawerTitle}>Menu Navigasi</Text>
+                <Text style={drawerStyles.drawerSubtitle} numberOfLines={1}>
+                  {user.displayName || user.email}
+                </Text>
+              </View>
+
+              {adminPages.map((page) => {
+                const isActive = activeScreen === page.key;
+                return (
                   <Pressable
                     key={page.key}
                     onPress={() => {
@@ -128,52 +136,48 @@ export default function App() {
                     }}
                     style={[
                       drawerStyles.drawerItem,
-                      activeScreen === page.key &&
-                        drawerStyles.drawerItemActive,
+                      isActive && drawerStyles.drawerItemActive,
                     ]}
                     accessibilityRole="button"
                   >
+                    <Text style={drawerStyles.drawerItemIcon}>{page.icon}</Text>
                     <Text
                       style={[
                         drawerStyles.drawerItemText,
-                        activeScreen === page.key &&
-                          drawerStyles.drawerItemTextActive,
+                        isActive && drawerStyles.drawerItemTextActive,
                       ]}
                     >
                       {page.label}
                     </Text>
                   </Pressable>
-                ))}
-                <View style={drawerStyles.logoutContainer}>
-                  <Pressable
-                    onPress={() => {
-                      setDrawerVisible(false);
-                      handleLogout();
-                    }}
-                    style={drawerStyles.drawerItem}
-                    accessibilityRole="button"
-                  >
-                    <Text style={drawerStyles.logoutText}>Keluar</Text>
-                  </Pressable>
-                </View>
-              </SafeAreaView>
-            </View>
-            <Pressable
-              style={drawerStyles.drawerBackdrop}
-              onPress={() => setDrawerVisible(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Tutup menu"
-            />
-          </View>
-        </Modal>
-      </SafeAreaView>
-    );
-  }
+                );
+              })}
 
-  return (
-    <>
-      <StatusBar style="dark" />
-      {content}
-    </>
+              <View style={drawerStyles.logoutContainer}>
+                <Pressable
+                  onPress={() => {
+                    setDrawerVisible(false);
+                    handleLogout();
+                  }}
+                  style={drawerStyles.logoutButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Keluar dari akun"
+                >
+                  <Text style={{ fontSize: 16 }}>🚪</Text>
+                  <Text style={drawerStyles.logoutText}>Keluar</Text>
+                </Pressable>
+              </View>
+            </SafeAreaView>
+          </View>
+
+          <Pressable
+            style={drawerStyles.drawerBackdrop}
+            onPress={() => setDrawerVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Tutup menu navigasi"
+          />
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }

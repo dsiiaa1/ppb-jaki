@@ -1,64 +1,185 @@
 import { StyleSheet } from "react-native";
-
-const colors = {
-  background: "#F4F4F4",
-  border: "#CCCCCC",
-  green: "#176B5B",
-  muted: "#666666",
-  text: "#222222",
-  white: "#FFFFFF",
-  red: "#A12B20",
-};
+import { colors, commonStyles } from "./theme";
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: colors.background, flex: 1 },
-  content: {
-    alignSelf: "center",
-    maxWidth: 1040,
-    padding: 16,
-    paddingBottom: 28,
-    width: "100%",
+  ...commonStyles,
+
+  // Tab Switcher
+  tabsRow: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: 8,
+    flexDirection: "row",
+    marginTop: 20,
+    padding: 4,
   },
-  pageHeader: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    marginBottom: 14,
-    paddingBottom: 12,
+  tabButton: {
+    alignItems: "center",
+    borderRadius: 6,
+    flex: 1,
+    justifyContent: "center",
+    paddingVertical: 10,
   },
-  title: { color: colors.text, fontSize: 22, fontWeight: "600" },
-  subtitle: { color: colors.muted, fontSize: 13, marginTop: 5 },
-  list: {
+  tabButtonActive: {
     backgroundColor: colors.white,
     borderColor: colors.border,
     borderWidth: 1,
-    paddingHorizontal: 14,
   },
-  loanRow: {
-    borderBottomColor: colors.border,
+  tabText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  tabTextActive: {
+    color: colors.primary,
+    fontWeight: "700",
+  },
+
+  // Form Section
+  formCard: {
+    marginTop: 20,
+  },
+  formTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  helperText: {
+    color: "#94A3B8",
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  // Custom Dropdown Picker
+  dropdownBtn: {
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  dropdownBtnDisabled: {
+    backgroundColor: colors.bg,
+  },
+  dropdownText: {
+    color: colors.text,
+    fontSize: 14,
+  },
+  dropdownPlaceholder: {
+    color: "#94A3B8",
+  },
+  dropdownArrow: {
+    color: colors.muted,
+    fontSize: 11,
+    marginLeft: 8,
+  },
+  dropdownMenu: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+    maxHeight: 200,
+    zIndex: 100,
+  },
+  dropdownItem: {
+    borderBottomColor: "#F1F5F9",
     borderBottomWidth: 1,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  loanRowLast: { borderBottomWidth: 0 },
-  rowHeading: {
+  dropdownItemText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  dropdownItemSub: {
+    color: colors.muted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  // Active Loans List (Tab 2)
+  loanListContainer: {
+    marginTop: 20,
+  },
+  emptyBox: {
+    alignItems: "center",
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 36,
+  },
+  emptyBoxText: {
+    color: colors.muted,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  loanCard: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 16,
+  },
+  loanCardHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
+    marginBottom: 8,
   },
-  borrower: { color: colors.text, flex: 1, fontSize: 15, fontWeight: "600" },
-  status: { color: colors.green, fontSize: 12, fontWeight: "600" },
-  detail: { color: colors.muted, fontSize: 13, marginTop: 5 },
-  messageBox: {
-    alignItems: "center",
-    backgroundColor: colors.white,
-    borderColor: colors.border,
+  borrowerName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  statusBadge: {
+    backgroundColor: colors.amberBg,
+    borderColor: colors.amberBorder,
+    borderRadius: 20,
     borderWidth: 1,
-    minHeight: 110,
-    justifyContent: "center",
-    padding: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
-  messageText: { color: colors.muted, fontSize: 13, marginTop: 8, textAlign: "center" },
-  error: { color: colors.red, fontSize: 13, marginBottom: 12 },
+  statusText: {
+    color: colors.amberText,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  loanDetailRow: {
+    color: colors.muted,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  loanDetailBold: {
+    color: colors.text,
+    fontWeight: "600",
+  },
+  actionReturnBtn: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.greenBg,
+    borderColor: colors.greenBorder,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  actionReturnText: {
+    color: colors.greenText,
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });
 
 export default styles;

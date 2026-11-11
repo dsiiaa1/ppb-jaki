@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -11,365 +17,440 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  runTransaction,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
-import AlatHeader from "../components/alat/AlatHeader";
-import AlatList from "../components/alat/AlatList";
-import DeleteToolModal from "../components/alat/DeleteToolModal";
-import BorrowerFormModal from "../components/alat/BorrowerFormModal";
-import ToolFormModal from "../components/alat/ToolFormModal";
-import { db } from "../config/firebase";
 import styles from "../style/AlatStyle";
+import { db } from "../config/firebase";
+import { logActivity } from "../utils/helpers";
 
-const emptyForm = { code: "", name: "", category: "", stock: "" };
-const emptyBorrowerForm = {
-  name: "",
-  identity: "",
-  unit: "",
-  alat: "",
-  alatId: "",
-  phone: "",
-};
-
-export default function Alat() {
+export default function Alat({ onNavigate }) {
   const { width } = useWindowDimensions();
-  const compact = width < 600;
+  const compact = width < 640;
+
   const [tools, setTools] = useState([]);
-  const [search, setSearch] = useState("");
+  const [borrowedToolIds, setBorrowedToolIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [formVisible, setFormVisible] = useState(false);
-  const [borrowerFormVisible, setBorrowerFormVisible] = useState(false);
-  const [borrowerForm, setBorrowerForm] = useState(emptyBorrowerForm);
+
+  // Form state
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+
+  // Edit modal state
   const [editingTool, setEditingTool] = useState(null);
-  const [deletingTool, setDeletingTool] = useState(null);
-  const [form, setForm] = useState(emptyForm);
+  const [editCode, setEditCode] = useState("");
+  const [editName, setEditName] = useState("");
 
-  useEffect(
-    () =>
-      onSnapshot(
-        collection(db, "alat"),
-        (snapshot) => {
-          setTools(
-            snapshot.docs.map((document) => {
-              const data = document.data();
-              return {
-                id: document.id,
-                code: data.kode || document.id,
-                name: data.nama || data.name || "Alat tanpa nama",
-                category: data.kategori || data.category || "Umum",
-                stock: Number(data.stok ?? data.stock ?? 0),
-              };
-            }),
-          );
-          setLoading(false);
-          setError("");
-        },
-        () => {
-          setError(
-            "Daftar alat gagal dimuat. Periksa koneksi dan akses Firebase.",
-          );
-          setLoading(false);
-        },
-      ),
-    [],
-  );
-
-  const filteredTools = tools.filter((tool) =>
-    `${tool.code} ${tool.name} ${tool.category}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase()),
-  );
-  const totalStock = tools.reduce((total, tool) => total + tool.stock, 0);
-
-  const openCreateForm = () => {
-    setEditingTool(null);
-    setForm({
-      ...emptyForm,
-      code: `ALT-${Date.now().toString(36).toUpperCase()}`,
-    });
-    setError("");
-    setFormVisible(true);
-  };
-
-  const openBorrowerForm = () => {
-    setBorrowerForm(emptyBorrowerForm);
-    setError("");
-    setBorrowerFormVisible(true);
-  };
-
-  const saveBorrower = async () => {
-    const name = borrowerForm.name.trim();
-    const identity = borrowerForm.identity.trim();
-    const unit = borrowerForm.unit.trim();
-    const phone = borrowerForm.phone.trim();
-
-    if (!name || !identity || !unit || !borrowerForm.alatId) {
-      setError("Nama, NIM/NIP, kelas atau unit, dan nama barang wajib diisi.");
-      return;
-    }
-
-    const selectedTool = tools.find((tool) => tool.id === borrowerForm.alatId);
-    if (!selectedTool) {
-      setError("Barang yang dipilih sudah tidak tersedia. Pilih barang kembali.");
-      return;
-    }
-
-    setSubmitting(true);
-    setError("");
-    try {
-      const borrowerRef = doc(collection(db, "peminjam"));
-      const loanRef = doc(collection(db, "peminjaman"));
-      const toolRef = doc(db, "alat", selectedTool.id);
-
-      await runTransaction(db, async (transaction) => {
-        const toolSnapshot = await transaction.get(toolRef);
-        if (!toolSnapshot.exists()) {
-          throw new Error("Barang tidak ditemukan di inventaris.");
-        }
-
-        const toolData = toolSnapshot.data();
-        const stockField = Object.hasOwn(toolData, "stok")
-          ? "stok"
-          : Object.hasOwn(toolData, "stock")
-            ? "stock"
-            : "stok";
-        const currentStock = Number(toolData[stockField] ?? 0);
-        if (!Number.isInteger(currentStock) || currentStock < 0) {
-          throw new Error("Stok barang tidak valid. Periksa data inventaris.");
-        }
-        if (currentStock < 1) {
-          throw new Error("Stok barang habis. Pilih barang lain.");
-        }
-
-        const timestamp = serverTimestamp();
-        const borrowerData = {
-          nama: name,
-          identitas: identity,
-          unit,
-          alat: selectedTool.name,
-          namaAlat: selectedTool.name,
-          alatId: selectedTool.id,
-          kodeAlat: selectedTool.code,
-          telepon: phone,
-          dibuatPada: timestamp,
-        };
-
-        transaction.update(toolRef, {
-          [stockField]: currentStock - 1,
-          diperbaruiPada: timestamp,
-        });
-        transaction.set(borrowerRef, borrowerData);
-        transaction.set(loanRef, {
-          ...borrowerData,
-          namaPeminjam: name,
-          jumlah: 1,
-          status: "dipinjam",
-          tanggalPinjam: timestamp,
-        });
-      });
-      setNotice(`${name} berhasil meminjam ${selectedTool.name}. Stok diperbarui.`);
-      setBorrowerFormVisible(false);
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error && saveError.message
-          ? saveError.message
-          : "Peminjaman gagal disimpan. Periksa koneksi dan akses Firebase, lalu coba lagi.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const openEditForm = (tool) => {
-    setEditingTool(tool);
-    setForm({
-      code: tool.code,
-      name: tool.name,
-      category: tool.category,
-      stock: String(tool.stock),
-    });
-    setError("");
-    setFormVisible(true);
-  };
-
-  const saveTool = async () => {
-    const code = form.code.trim().toUpperCase();
-    const name = form.name.trim();
-    const category = form.category.trim();
-    const stock = Number(form.stock);
-    if (
-      !code ||
-      !name ||
-      !category ||
-      form.stock.trim() === "" ||
-      !Number.isInteger(stock) ||
-      stock < 0
-    ) {
-      setError(
-        "Isi kode, nama, kategori, dan stok dengan benar. Stok harus bilangan bulat 0 atau lebih.",
-      );
-      return;
-    }
-
-    const duplicateCode = tools.some(
-      (tool) => tool.id !== editingTool?.id && tool.code.toUpperCase() === code,
+  useEffect(() => {
+    const unsubTools = onSnapshot(
+      collection(db, "alat"),
+      (snapshot) => {
+        setTools(
+          snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              code: data.kode || data.code || d.id,
+              name: data.nama || data.name || "Tanpa Nama",
+              stock: Number(data.stok ?? data.stock ?? 1),
+            };
+          }),
+        );
+        setLoading(false);
+      },
+      () => {
+        setError("Gagal memuat data alat.");
+        setLoading(false);
+      },
     );
-    if (duplicateCode) {
-      setError("Kode alat sudah digunakan. Masukkan kode yang berbeda.");
+
+    const unsubLoans = onSnapshot(
+      collection(db, "peminjaman"),
+      (snapshot) => {
+        const activeIds = new Set();
+        snapshot.docs.forEach((d) => {
+          const data = d.data();
+          const s = String(data.status || "").trim().toLowerCase();
+          if (["dipinjam", "disetujui", "borrowed", "aktif"].includes(s)) {
+            if (data.alatId) activeIds.add(data.alatId);
+            if (data.kodeAlat) activeIds.add(data.kodeAlat);
+          }
+        });
+        setBorrowedToolIds(activeIds);
+      },
+      () => {},
+    );
+
+    return () => {
+      unsubTools();
+      unsubLoans();
+    };
+  }, []);
+
+  const handleSaveTool = async () => {
+    const trimmedCode = code.trim().toUpperCase();
+    const trimmedName = name.trim();
+
+    if (!trimmedCode || !trimmedName) {
+      setError("Kode alat dan nama alat wajib diisi.");
+      return;
+    }
+
+    if (tools.some((t) => t.code.toUpperCase() === trimmedCode)) {
+      setError("Kode alat sudah terdaftar. Gunakan kode yang unik.");
+      return;
+    }
+
+    setError("");
+    setNotice("");
+    setSubmitting(true);
+
+    try {
+      await addDoc(collection(db, "alat"), {
+        kode: trimmedCode,
+        nama: trimmedName,
+        kategori: "Umum",
+        stok: 1,
+        dibuatPada: serverTimestamp(),
+      });
+
+      await logActivity(
+        db,
+        `Alat baru ditambahkan: ${trimmedName} (${trimmedCode})`,
+        "tambah",
+      );
+
+      setCode("");
+      setName("");
+      setNotice(`Alat "${trimmedName}" berhasil disimpan.`);
+    } catch {
+      setError("Gagal menyimpan alat baru.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (tool) => {
+    setEditingTool(tool);
+    setEditCode(tool.code);
+    setEditName(tool.name);
+  };
+
+  const handleUpdateTool = async () => {
+    if (!editingTool) return;
+    const trimmedCode = editCode.trim().toUpperCase();
+    const trimmedName = editName.trim();
+
+    if (!trimmedCode || !trimmedName) {
+      setError("Kode dan nama alat tidak boleh kosong.");
       return;
     }
 
     setSubmitting(true);
-    setError("");
     try {
-      const values = {
-        kode: code,
-        nama: name,
-        kategori: category,
-        stok: stock,
+      await updateDoc(doc(db, "alat", editingTool.id), {
+        kode: trimmedCode,
+        nama: trimmedName,
         diperbaruiPada: serverTimestamp(),
-      };
-      if (editingTool) {
-        await updateDoc(doc(db, "alat", editingTool.id), values);
-        setNotice(`${name} berhasil diperbarui.`);
-      } else {
-        await addDoc(collection(db, "alat"), {
-          ...values,
-          dibuatPada: serverTimestamp(),
-        });
-        setNotice(`${name} berhasil ditambahkan.`);
+      });
+      setEditingTool(null);
+      setNotice(`Data alat "${trimmedName}" berhasil diperbarui.`);
+    } catch {
+      setError("Gagal memperbarui alat.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteTool = async (tool) => {
+    const confirmDelete = async () => {
+      try {
+        await deleteDoc(doc(db, "alat", tool.id));
+        setNotice(`Alat "${tool.name}" berhasil dihapus.`);
+      } catch {
+        setError("Gagal menghapus alat.");
       }
-      setFormVisible(false);
-    } catch {
-      setError(
-        "Perubahan gagal disimpan. Periksa koneksi dan akses Firebase, lalu coba lagi.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    };
 
-  const removeTool = async () => {
-    if (!deletingTool) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      await deleteDoc(doc(db, "alat", deletingTool.id));
-      setNotice(`${deletingTool.name} berhasil dihapus.`);
-      setDeletingTool(null);
-    } catch {
-      setError(
-        "Alat gagal dihapus. Periksa koneksi dan akses Firebase, lalu coba lagi.",
+    if (Platform.OS === "web") {
+      if (window.confirm(`Yakin ingin menghapus alat "${tool.name}"?`)) {
+        await confirmDelete();
+      }
+    } else {
+      Alert.alert(
+        "Hapus Alat",
+        `Yakin ingin menghapus alat "${tool.name}"?`,
+        [
+          { text: "Batal", style: "cancel" },
+          { text: "Hapus", style: "destructive", onPress: confirmDelete },
+        ],
       );
-    } finally {
-      setSubmitting(false);
     }
-  };
-
-  const closeDeleteModal = () => {
-    setDeletingTool(null);
-    setError("");
   };
 
   return (
     <View style={styles.safeArea}>
       <ScrollView
-        contentContainerStyle={styles.page}
+        contentContainerStyle={styles.scrollContainer}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.content}>
-          <AlatHeader
-            onAdd={openCreateForm}
-            onAddBorrower={openBorrowerForm}
-            compact={compact}
-          />
-          <View
-            style={[styles.summaryRow, compact && styles.summaryRowCompact]}
-          >
-            <View style={styles.summaryBlock}>
-              <Text style={styles.summaryLabel}>JENIS ALAT</Text>
-              <Text style={styles.summaryValue}>
-                {loading ? "-" : tools.length}
-              </Text>
+        <View style={[styles.container, compact && styles.containerMobile]}>
+          {/* Header */}
+          <View style={styles.badgePill}>
+            <Text style={styles.badgeText}>MANAJEMEN INVENTARIS</Text>
+          </View>
+          <Text style={styles.pageTitle}>Data Alat</Text>
+          <Text style={styles.pageSubtitle}>
+            Kelola data dan pantau status ketersediaan inventaris alat
+          </Text>
+
+          {notice ? (
+            <View style={styles.notice}>
+              <Text style={styles.noticeText}>{notice}</Text>
             </View>
-            <View
-              style={[
-                styles.summaryDivider,
-                compact && styles.summaryDividerCompact,
-              ]}
+          ) : null}
+
+          {error ? (
+            <View style={styles.error}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
+
+          {/* Section: Tambah Alat Baru */}
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Tambah Alat Baru</Text>
+
+            <Text style={styles.inputLabel}>Kode Alat</Text>
+            <TextInput
+              value={code}
+              onChangeText={setCode}
+              placeholder="Contoh: ALT-001"
+              placeholderTextColor="#94A3B8"
+              style={styles.input}
+              autoCapitalize="characters"
             />
-            <View style={styles.summaryBlock}>
-              <Text style={styles.summaryLabel}>TOTAL UNIT</Text>
-              <Text style={styles.summaryValue}>
-                {loading ? "-" : totalStock}
-              </Text>
+
+            <Text style={styles.inputLabel}>Nama Alat / Perangkat</Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Contoh: Proyektor Epson EB-X500"
+              placeholderTextColor="#94A3B8"
+              style={styles.input}
+            />
+
+            <Pressable
+              onPress={handleSaveTool}
+              disabled={submitting}
+              style={[
+                styles.submitButton,
+                submitting && styles.submitButtonDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Simpan Alat Baru"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>+ Simpan Alat Baru</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Section: Daftar Inventaris */}
+          <View style={styles.listSectionHeader}>
+            <Text style={styles.sectionTitle}>Daftar Inventaris</Text>
+            <View style={styles.unitBadge}>
+              <Text style={styles.unitBadgeText}>{tools.length} Unit</Text>
             </View>
           </View>
-          <AlatList
-            tools={tools}
-            filteredTools={filteredTools}
-            loading={loading}
-            error={error}
-            showError={Boolean(
-              error &&
-              !formVisible &&
-              !borrowerFormVisible &&
-              !deletingTool,
+
+          <View style={styles.tableContainer}>
+            {/* Table Header */}
+            <View style={styles.tableHeader}>
+              <Text style={[styles.thText, styles.thKode]}>KODE</Text>
+              <Text style={[styles.thText, styles.thNama]}>NAMA</Text>
+              <Text style={[styles.thText, styles.thStatus]}>STATUS</Text>
+              <Text style={[styles.thText, styles.thAksi]}>AKSI</Text>
+            </View>
+
+            {/* Table Body / Empty State */}
+            {loading ? (
+              <View style={styles.emptyBox}>
+                <ActivityIndicator color="#2563EB" />
+                <Text style={[styles.emptyBoxText, { marginTop: 8 }]}>
+                  Memuat data inventaris...
+                </Text>
+              </View>
+            ) : tools.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyBoxText}>
+                  Belum ada data alat. Silakan tambahkan alat di atas.
+                </Text>
+              </View>
+            ) : (
+              tools.map((tool) => {
+                const isBorrowed =
+                  borrowedToolIds.has(tool.id) || borrowedToolIds.has(tool.code);
+
+                return (
+                  <View key={tool.id} style={styles.tableRow}>
+                    <Text style={styles.tdKode} numberOfLines={1}>
+                      {tool.code}
+                    </Text>
+                    <Text style={styles.tdNama} numberOfLines={1}>
+                      {tool.name}
+                    </Text>
+                    <View style={styles.tdStatus}>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          isBorrowed
+                            ? styles.statusBadgeDipinjam
+                            : styles.statusBadgeTersedia,
+                        ]}
+                      >
+                        <Text
+                          style={
+                            isBorrowed
+                              ? styles.statusTextDipinjam
+                              : styles.statusTextTersedia
+                          }
+                        >
+                          {isBorrowed ? "Dipinjam" : "Tersedia"}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.tdAksi}>
+                      <Pressable
+                        onPress={() => handleOpenEdit(tool)}
+                        style={styles.actionEditBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit Alat"
+                      >
+                        <Text style={styles.actionEditText}>Edit</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleDeleteTool(tool)}
+                        style={styles.actionDeleteBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel="Hapus Alat"
+                      >
+                        <Text style={styles.actionDeleteText}>Hapus</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
             )}
-            search={search}
-            onSearchChange={setSearch}
-            notice={notice}
-            onDismissNotice={() => setNotice("")}
-            onAdd={openCreateForm}
-            onEdit={openEditForm}
-            onDelete={(tool) => {
-              setError("");
-              setDeletingTool(tool);
-            }}
-            compact={compact}
-          />
+          </View>
+
+          {/* Bottom Button: Kembali ke Dashboard */}
+          <Pressable
+            onPress={() => onNavigate && onNavigate("home")}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Kembali ke Dashboard"
+          >
+            <Text style={styles.backButtonText}>← Kembali ke Dashboard</Text>
+          </Pressable>
         </View>
       </ScrollView>
 
-      <ToolFormModal
-        visible={formVisible}
-        onClose={() => setFormVisible(false)}
-        editingTool={editingTool}
-        form={form}
-        onChange={(field, value) =>
-          setForm((current) => ({ ...current, [field]: value }))
-        }
-        error={formVisible ? error : ""}
-        submitting={submitting}
-        onSave={saveTool}
-      />
+      {/* Edit Tool Modal */}
+      {editingTool ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setEditingTool(null)}
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(15, 23, 42, 0.4)",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: 20,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: "#FFFFFF",
+                borderRadius: 12,
+                padding: 20,
+                width: "100%",
+                maxWidth: 420,
+                borderColor: "#E2E8F0",
+                borderWidth: 1,
+              }}
+            >
+              <Text
+                style={{ fontSize: 16, fontWeight: "700", color: "#0F172A" }}
+              >
+                Edit Data Alat
+              </Text>
 
-      <BorrowerFormModal
-        visible={borrowerFormVisible}
-        onClose={() => setBorrowerFormVisible(false)}
-        tools={tools}
-        toolsLoading={loading}
-        form={borrowerForm}
-        onChange={(field, value) =>
-          setBorrowerForm((current) => ({ ...current, [field]: value }))
-        }
-        error={borrowerFormVisible ? error : ""}
-        submitting={submitting}
-        onSave={saveBorrower}
-      />
+              <Text style={styles.inputLabel}>Kode Alat</Text>
+              <TextInput
+                value={editCode}
+                onChangeText={setEditCode}
+                style={styles.input}
+                autoCapitalize="characters"
+              />
 
-      <DeleteToolModal
-        tool={deletingTool}
-        error={deletingTool ? error : ""}
-        submitting={submitting}
-        onClose={closeDeleteModal}
-        onConfirm={removeTool}
-      />
+              <Text style={styles.inputLabel}>Nama Alat</Text>
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                style={styles.input}
+              />
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "flex-end",
+                  marginTop: 20,
+                  gap: 10,
+                }}
+              >
+                <Pressable
+                  onPress={() => setEditingTool(null)}
+                  style={{
+                    paddingVertical: 10,
+                    paddingHorizontal: 16,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: "#E2E8F0",
+                  }}
+                >
+                  <Text style={{ fontSize: 13, color: "#64748B" }}>Batal</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleUpdateTool}
+                  disabled={submitting}
+                  style={{
+                    paddingVertical: 10,
+                    paddingHorizontal: 16,
+                    borderRadius: 8,
+                    backgroundColor: "#2563EB",
+                  }}
+                >
+                  <Text
+                    style={{ fontSize: 13, color: "#FFFFFF", fontWeight: "600" }}
+                  >
+                    Simpan Perubahan
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
     </View>
   );
 }

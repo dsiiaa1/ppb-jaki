@@ -1,107 +1,267 @@
 import { useEffect, useState } from "react";
-import { Text, View, useWindowDimensions } from "react-native";
-import { collection, onSnapshot } from "firebase/firestore";
+import {
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import {
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+} from "firebase/firestore";
 import styles from "../style/Style";
 import { db } from "../config/firebase";
 
-export default function Home({ userName }) {
+export default function Home({ onNavigate }) {
   const { width } = useWindowDimensions();
-  const compact = width < 600;
-  const [toolCount, setToolCount] = useState(null);
-  const [availableStock, setAvailableStock] = useState(null);
-  const [borrowedUnits, setBorrowedUnits] = useState(null);
-  const [summaryError, setSummaryError] = useState(false);
+  const compact = width < 640;
+
+  const [totalAlat, setTotalAlat] = useState(0);
+  const [dipinjam, setDipinjam] = useState(0);
+  const [pengembalian, setPengembalian] = useState(0);
+  const [activities, setActivities] = useState([]);
 
   useEffect(() => {
-    const unsubscribeTools = onSnapshot(
+    // 1. Subscribe to alat
+    const unsubscribeAlat = onSnapshot(
       collection(db, "alat"),
       (snapshot) => {
-        const units = snapshot.docs.reduce((total, document) => {
-          const data = document.data();
-          const stock = Number(data.stok ?? data.stock ?? 0);
-          return total + (Number.isFinite(stock) ? Math.max(0, stock) : 0);
-        }, 0);
-        setToolCount(snapshot.size);
-        setAvailableStock(units);
+        setTotalAlat(snapshot.size);
       },
-      () => setSummaryError(true),
+      () => {},
     );
-    const unsubscribeLoans = onSnapshot(
+
+    // 2. Subscribe to peminjaman
+    const unsubscribePeminjaman = onSnapshot(
       collection(db, "peminjaman"),
       (snapshot) => {
-        const units = snapshot.docs.reduce((total, document) => {
-          const data = document.data();
-          const status = String(data.status || "").trim().toLowerCase();
-          if (
-            !["dipinjam", "disetujui", "approved", "borrowed"].includes(status)
-          ) {
-            return total;
-          }
+        let activeLoansCount = 0;
+        let returnedLoansCount = 0;
 
-          const quantity = Number(
-            data.jumlah ?? data.quantity ?? data.qty ?? 1,
-          );
-          return total + (Number.isFinite(quantity) ? Math.max(0, quantity) : 1);
-        }, 0);
-        setBorrowedUnits(units);
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const status = String(data.status || "").trim().toLowerCase();
+          if (["dipinjam", "disetujui", "borrowed", "aktif"].includes(status)) {
+            activeLoansCount += 1;
+          } else if (
+            ["kembali", "dikembalikan", "returned", "selesai"].includes(status)
+          ) {
+            returnedLoansCount += 1;
+          }
+        });
+
+        setDipinjam(activeLoansCount);
+        setPengembalian(returnedLoansCount);
       },
-      () => setSummaryError(true),
+      () => {},
+    );
+
+    // 3. Subscribe to aktivitas
+    const qAktivitas = query(
+      collection(db, "aktivitas"),
+      orderBy("waktu", "desc"),
+      limit(5),
+    );
+    const unsubscribeAktivitas = onSnapshot(
+      qAktivitas,
+      (snapshot) => {
+        const list = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setActivities(list);
+      },
+      () => {
+        // Fallback gracefully
+      },
     );
 
     return () => {
-      unsubscribeTools();
-      unsubscribeLoans();
+      unsubscribeAlat();
+      unsubscribePeminjaman();
+      unsubscribeAktivitas();
     };
   }, []);
 
-  const totalUnits =
-    availableStock === null || borrowedUnits === null
-      ? null
-      : availableStock + borrowedUnits;
+  const tersedia = Math.max(0, totalAlat - dipinjam);
+
+  const handleNavigate = (key) => {
+    if (typeof onNavigate === "function") {
+      onNavigate(key);
+    }
+  };
 
   return (
     <View style={styles.safeArea}>
-      <View style={styles.homeContainer}>
-        <Text style={styles.eyebrow}>DASHBOARD</Text>
-        <Text style={styles.homeTitle}>Selamat datang, Super Admin</Text>
-        <Text style={styles.homeSubtitle}>
-          {userName || "Kelola inventaris dan peminjaman."}
-        </Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.homeContainer}>
+          {/* Hero Banner (Image 1) */}
+          <View style={styles.heroBanner}>
+            <View style={styles.heroBadge}>
+              <Text style={styles.heroBadgeText}>✨ RINGKASAN SISTEM</Text>
+            </View>
+            <Text style={styles.heroTitle}>Selamat Datang 👋</Text>
+            <Text style={styles.heroSubtitle}>
+              Sistem Informasi & Manajemen Peminjaman Alat
+            </Text>
+            <View style={styles.heroStatusRow}>
+              <Text style={styles.heroStatusDot}>●</Text>
+              <Text style={styles.heroStatusText}>
+                Status Operasional:{" "}
+                <Text style={styles.heroStatusHighlight}>Normal & Siap</Text>
+              </Text>
+            </View>
+          </View>
 
-        <Text style={styles.sectionTitle}>Ringkasan</Text>
-        <View style={[styles.summaryRow, compact && styles.summaryRowCompact]}>
-          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
-            <Text style={styles.summaryValue}>
-              {toolCount === null ? "--" : toolCount}
-            </Text>
-            <Text style={styles.summaryLabel}>Jenis alat</Text>
+          {/* Quick Actions Navigation Row */}
+          <View
+            style={[
+              styles.quickActionsRow,
+              compact && styles.quickActionsRowCompact,
+            ]}
+          >
+            <Pressable
+              onPress={() => handleNavigate("peminjaman")}
+              style={[styles.quickActionBtn, styles.quickActionPinjam]}
+              accessibilityRole="button"
+              accessibilityLabel="Pinjam Alat"
+            >
+              <Text style={{ fontSize: 14 }}>📥</Text>
+              <Text style={styles.quickActionPinjamText}>Pinjam Alat</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleNavigate("pengembalian")}
+              style={[styles.quickActionBtn, styles.quickActionKembalikan]}
+              accessibilityRole="button"
+              accessibilityLabel="Kembalikan"
+            >
+              <Text style={{ fontSize: 14 }}>📤</Text>
+              <Text style={styles.quickActionKembalikanText}>Kembalikan</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleNavigate("alat")}
+              style={[styles.quickActionBtn, styles.quickActionDataAlat]}
+              accessibilityRole="button"
+              accessibilityLabel="Data Alat"
+            >
+              <Text style={{ fontSize: 14 }}>📦</Text>
+              <Text style={styles.quickActionDataAlatText}>Data Alat</Text>
+            </Pressable>
           </View>
-          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
-            <Text style={styles.summaryValue}>
-              {totalUnits === null ? "--" : totalUnits}
-            </Text>
-            <Text style={styles.summaryLabel}>Total alat</Text>
+
+          {/* 4 Metric Cards Grid */}
+          <View style={styles.statsGrid}>
+            {/* Total Alat */}
+            <View style={[styles.statCard, styles.statCardBlue]}>
+              <View style={styles.statHeaderRow}>
+                <Text style={styles.statIcon}>📦</Text>
+                <Text style={[styles.statLabel, styles.statLabelBlue]}>
+                  TOTAL ALAT
+                </Text>
+              </View>
+              <Text style={[styles.statValue, styles.statValueBlue]}>
+                {totalAlat}
+              </Text>
+              <Text style={styles.statSubtitle}>Unit terdaftar</Text>
+            </View>
+
+            {/* Dipinjam */}
+            <View style={[styles.statCard, styles.statCardAmber]}>
+              <View style={styles.statHeaderRow}>
+                <Text style={styles.statIcon}>⏳</Text>
+                <Text style={[styles.statLabel, styles.statLabelAmber]}>
+                  DIPINJAM
+                </Text>
+              </View>
+              <Text style={[styles.statValue, styles.statValueAmber]}>
+                {dipinjam}
+              </Text>
+              <Text style={styles.statSubtitle}>Dalam pemakaian</Text>
+            </View>
+
+            {/* Tersedia */}
+            <View style={[styles.statCard, styles.statCardGreen]}>
+              <View style={styles.statHeaderRow}>
+                <Text style={styles.statIcon}>✅</Text>
+                <Text style={[styles.statLabel, styles.statLabelGreen]}>
+                  TERSEDIA
+                </Text>
+              </View>
+              <Text style={[styles.statValue, styles.statValueGreen]}>
+                {tersedia}
+              </Text>
+              <Text style={styles.statSubtitle}>Siap di pinjam</Text>
+            </View>
+
+            {/* Pengembalian */}
+            <View style={[styles.statCard, styles.statCardPurple]}>
+              <View style={styles.statHeaderRow}>
+                <Text style={styles.statIcon}>🗃️</Text>
+                <Text style={[styles.statLabel, styles.statLabelPurple]}>
+                  PENGEMBALIAN
+                </Text>
+              </View>
+              <Text style={[styles.statValue, styles.statValuePurple]}>
+                {pengembalian}
+              </Text>
+              <Text style={styles.statSubtitle}>Telah dikembalikan</Text>
+            </View>
           </View>
-          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
-            <Text style={styles.summaryValue}>
-              {availableStock === null ? "--" : availableStock}
-            </Text>
-            <Text style={styles.summaryLabel}>Tersedia</Text>
-          </View>
-          <View style={[styles.summaryItem, compact && styles.summaryItemCompact]}>
-            <Text style={styles.summaryValue}>
-              {borrowedUnits === null ? "--" : borrowedUnits}
-            </Text>
-            <Text style={styles.summaryLabel}>Dipinjam</Text>
+
+          {/* Aktivitas Terbaru Card */}
+          <View style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Text style={styles.activityTitle}>Aktivitas Terbaru</Text>
+              <View style={styles.realtimeBadge}>
+                <Text style={styles.realtimeDot}>●</Text>
+                <Text style={styles.realtimeText}>Realtime</Text>
+              </View>
+            </View>
+
+            {activities.length === 0 ? (
+              <View style={styles.emptyActivityBox}>
+                <View style={styles.emptyActivityIconWrap}>
+                  <Text style={styles.emptyActivityIcon}>📋</Text>
+                </View>
+                <Text style={styles.emptyActivityTitle}>
+                  Belum Ada Aktivitas
+                </Text>
+                <Text style={styles.emptyActivityDesc}>
+                  Riwayat transaksi peminjaman dan pengembalian alat akan
+                  tercatat di sini secara otomatis.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.activityList}>
+                {activities.map((item) => (
+                  <View key={item.id} style={styles.activityItem}>
+                    <Text style={styles.activityItemText}>
+                      {item.pesan || "Aktivitas peminjaman"}
+                    </Text>
+                    <Text style={styles.activityItemTime}>
+                      {item.waktu?.toDate
+                        ? item.waktu.toDate().toLocaleTimeString("id-ID", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "Baru saja"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         </View>
-        {summaryError ? (
-          <Text style={styles.summaryError}>
-            Ringkasan gagal dimuat. Periksa koneksi dan akses Firestore.
-          </Text>
-        ) : null}
-
-      </View>
+      </ScrollView>
     </View>
   );
 }

@@ -1,173 +1,460 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
-import { collection, onSnapshot } from "firebase/firestore";
-import { db } from "../config/firebase";
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 import styles from "../style/PeminjamanStyle";
-
-const activeStatuses = ["dipinjam", "disetujui", "approved", "borrowed"];
-
-const readValue = (data, keys) => {
-  for (const key of keys) {
-    const value = data[key];
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
-  return "";
-};
-
-const displayValue = (value) => {
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value);
-  }
-  if (value && typeof value === "object") {
-    return String(value.nama || value.name || value.displayName || value.id || "");
-  }
-  return "";
-};
-
-const formatDate = (value) => {
-  if (!value) return "";
-  const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
-  if (Number.isNaN(date.getTime())) return displayValue(value);
-  return date.toLocaleDateString("id-ID");
-};
-
-const getLoanDetails = (data) => ({
-  borrower:
-    displayValue(
-      readValue(data, [
-        "namaPeminjam",
-        "peminjamNama",
-        "borrowerName",
-        "borrower",
-        "peminjam",
-        "nama",
-        "name",
-      ]),
-    ) || "Nama peminjam tidak tersedia",
-  identity: displayValue(
-    readValue(data, ["identitas", "nim", "nip", "nomorIdentitas"]),
-  ),
-  tool:
-    displayValue(
-      readValue(data, [
-        "namaAlat",
-        "alatNama",
-        "itemName",
-        "alat",
-        "namaBarang",
-        "barang",
-        "tool",
-      ]),
-    ) || "Nama alat tidak tersedia",
-  quantity: displayValue(readValue(data, ["jumlah", "quantity", "qty"]) || 1),
-  loanDate: formatDate(
-    readValue(data, [
-      "tanggalPinjam",
-      "tanggalPeminjaman",
-      "tglPinjam",
-      "loanDate",
-      "createdAt",
-      "tanggal",
-    ]),
-  ),
-});
+import { db } from "../config/firebase";
+import { getDateString, logActivity } from "../utils/helpers";
 
 export default function Peminjaman() {
-  const [loans, setLoans] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { width } = useWindowDimensions();
+  const compact = width < 640;
 
-  useEffect(
-    () =>
-      onSnapshot(
-        collection(db, "peminjaman"),
-        (snapshot) => {
-          setLoans(
-            snapshot.docs
-              .map((document) => ({
-                id: document.id,
-                data: document.data(),
-              }))
-              .filter(({ data }) =>
-                activeStatuses.includes(
-                  String(data.status || "").trim().toLowerCase(),
-                ),
-              ),
-          );
-          setLoading(false);
-          setError("");
-        },
-        () => {
-          setError(
-            "Data peminjaman gagal dimuat. Periksa koneksi dan akses Firestore.",
-          );
-          setLoading(false);
-        },
-      ),
-    [],
+  const [activeTab, setActiveTab] = useState("form");
+  const [tools, setTools] = useState([]);
+  const [activeLoans, setActiveLoans] = useState([]);
+  const [borrowedToolIds, setBorrowedToolIds] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  // Form Fields
+  const [selectedTool, setSelectedTool] = useState(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [borrowerName, setBorrowerName] = useState("");
+  const [phoneDivisi, setPhoneDivisi] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [loanDate, setLoanDate] = useState(getDateString(0));
+  const [expectedReturnDate, setExpectedReturnDate] = useState(getDateString(3));
+
+  useEffect(() => {
+    const unsubTools = onSnapshot(
+      collection(db, "alat"),
+      (snapshot) => {
+        setTools(
+          snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              code: data.kode || data.code || d.id,
+              name: data.nama || data.name || "Tanpa Nama",
+              stock: Number(data.stok ?? data.stock ?? 1),
+            };
+          }),
+        );
+        setLoading(false);
+      },
+      () => {
+        setError("Gagal memuat daftar alat.");
+        setLoading(false);
+      },
+    );
+
+    const unsubLoans = onSnapshot(
+      collection(db, "peminjaman"),
+      (snapshot) => {
+        const borrowedIds = new Set();
+        const loansList = [];
+
+        snapshot.docs.forEach((d) => {
+          const data = d.data();
+          const s = String(data.status || "").trim().toLowerCase();
+          if (["dipinjam", "disetujui", "borrowed", "aktif"].includes(s)) {
+            if (data.alatId) borrowedIds.add(data.alatId);
+            if (data.kodeAlat) borrowedIds.add(data.kodeAlat);
+            loansList.push({ id: d.id, ...data });
+          }
+        });
+
+        setBorrowedToolIds(borrowedIds);
+        setActiveLoans(loansList);
+      },
+      () => {},
+    );
+
+    return () => {
+      unsubTools();
+      unsubLoans();
+    };
+  }, []);
+
+  const availableTools = tools.filter(
+    (tool) => !borrowedToolIds.has(tool.id) && !borrowedToolIds.has(tool.code),
   );
 
-  return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={styles.pageHeader}>
-        <Text style={styles.title}>Peminjam Aktif</Text>
-        <Text style={styles.subtitle}>
-          {loading ? "Memuat data..." : `${loans.length} data`}
-        </Text>
-      </View>
+  const handleSubmit = async () => {
+    const trimmedBorrower = borrowerName.trim();
+    if (!selectedTool) {
+      setError("Silakan pilih alat yang akan dipinjam.");
+      return;
+    }
+    if (!trimmedBorrower) {
+      setError("Nama peminjam wajib diisi.");
+      return;
+    }
+    if (!loanDate.trim() || !expectedReturnDate.trim()) {
+      setError("Tanggal pinjam dan rencana tanggal pengembalian wajib diisi.");
+      return;
+    }
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {loading ? (
-        <View style={styles.messageBox}>
-          <ActivityIndicator color="#176B5B" />
-          <Text style={styles.messageText}>Memuat data peminjaman...</Text>
-        </View>
-      ) : error ? null : loans.length === 0 ? (
-        <View style={styles.messageBox}>
-          <Text style={styles.messageText}>Belum ada peminjaman aktif.</Text>
-        </View>
-      ) : (
-        <View style={styles.list}>
-          {loans.map(({ id, data }, index) => {
-            const details = getLoanDetails(data);
-            return (
-              <View
-                key={id}
+    setError("");
+    setNotice("");
+    setSubmitting(true);
+
+    try {
+      await addDoc(collection(db, "peminjaman"), {
+        alatId: selectedTool.id,
+        kodeAlat: selectedTool.code,
+        namaAlat: selectedTool.name,
+        namaPeminjam: trimmedBorrower,
+        peminjam: trimmedBorrower,
+        telepon: phoneDivisi.trim(),
+        divisi: phoneDivisi.trim(),
+        keperluan: purpose.trim(),
+        tanggalPinjam: loanDate.trim(),
+        rencanaKembali: expectedReturnDate.trim(),
+        status: "dipinjam",
+        jumlah: 1,
+        dibuatPada: serverTimestamp(),
+      });
+
+      await logActivity(
+        db,
+        `${trimmedBorrower} meminjam ${selectedTool.name} (${selectedTool.code})`,
+        "pinjam",
+      );
+
+      setNotice(
+        `Peminjaman "${selectedTool.name}" untuk "${trimmedBorrower}" berhasil dicatat!`,
+      );
+      setSelectedTool(null);
+      setBorrowerName("");
+      setPhoneDivisi("");
+      setPurpose("");
+      setLoanDate(getDateString(0));
+      setExpectedReturnDate(getDateString(3));
+    } catch {
+      setError("Gagal mencatat peminjaman. Silakan coba lagi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReturnLoan = async (loan) => {
+    try {
+      await updateDoc(doc(db, "peminjaman", loan.id), {
+        status: "kembali",
+        tanggalKembali: getDateString(0),
+        diperbaruiPada: serverTimestamp(),
+      });
+
+      await logActivity(
+        db,
+        `${loan.namaPeminjam || "Peminjam"} mengembalikan ${loan.namaAlat || "Alat"}`,
+        "kembali",
+      );
+
+      setNotice(`Alat "${loan.namaAlat}" berhasil dikembalikan.`);
+    } catch {
+      setError("Gagal memproses pengembalian.");
+    }
+  };
+
+  return (
+    <View style={styles.safeArea}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.container, compact && styles.containerMobile]}>
+          {/* Header */}
+          <View style={styles.badgePill}>
+            <Text style={styles.badgeText}>TRANSAKSI PEMINJAMAN</Text>
+          </View>
+          <Text style={styles.pageTitle}>Peminjaman Alat</Text>
+          <Text style={styles.pageSubtitle}>
+            Catat peminjaman baru dan pantau daftar peminjam inventaris alat
+          </Text>
+
+          {notice ? (
+            <View style={styles.notice}>
+              <Text style={styles.noticeText}>{notice}</Text>
+            </View>
+          ) : null}
+
+          {error ? (
+            <View style={styles.error}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
+
+          {/* Tab Switcher */}
+          <View style={styles.tabsRow}>
+            <Pressable
+              onPress={() => setActiveTab("form")}
+              style={[
+                styles.tabButton,
+                activeTab === "form" && styles.tabButtonActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Form Pinjam Baru"
+            >
+              <Text
                 style={[
-                  styles.loanRow,
-                  index === loans.length - 1 && styles.loanRowLast,
+                  styles.tabText,
+                  activeTab === "form" && styles.tabTextActive,
                 ]}
               >
-                <View style={styles.rowHeading}>
-                  <Text style={styles.borrower} numberOfLines={2}>
-                    {details.borrower}
-                  </Text>
-                  <Text style={styles.status}>Aktif</Text>
+                + Form Pinjam Baru
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setActiveTab("list")}
+              style={[
+                styles.tabButton,
+                activeTab === "list" && styles.tabButtonActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Daftar Pinjaman"
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "list" && styles.tabTextActive,
+                ]}
+              >
+                Daftar Pinjaman ({activeLoans.length})
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Tab 1: Form Pinjam Baru */}
+          {activeTab === "form" ? (
+            <View style={styles.formCard}>
+              <Text style={styles.formTitle}>Formulir Peminjaman</Text>
+
+              {/* Tool Picker Dropdown */}
+              <Text style={styles.inputLabel}>
+                Pilih Alat (Hanya yang Tersedia) *
+              </Text>
+              <Pressable
+                onPress={() => {
+                  if (availableTools.length > 0) {
+                    setDropdownOpen(!dropdownOpen);
+                  }
+                }}
+                style={[
+                  styles.dropdownBtn,
+                  availableTools.length === 0 && styles.dropdownBtnDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Pilih alat yang tersedia"
+              >
+                <Text
+                  style={[
+                    styles.dropdownText,
+                    !selectedTool && styles.dropdownPlaceholder,
+                  ]}
+                >
+                  {availableTools.length === 0
+                    ? "Tidak ada alat tersedia saat ini"
+                    : selectedTool
+                      ? `${selectedTool.code} - ${selectedTool.name}`
+                      : "Pilih alat yang tersedia..."}
+                </Text>
+                <Text style={styles.dropdownArrow}>
+                  {dropdownOpen ? "▲" : "▼"}
+                </Text>
+              </Pressable>
+
+              {dropdownOpen && availableTools.length > 0 ? (
+                <View style={styles.dropdownMenu}>
+                  <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }}>
+                    {availableTools.map((tool) => (
+                      <Pressable
+                        key={tool.id}
+                        onPress={() => {
+                          setSelectedTool(tool);
+                          setDropdownOpen(false);
+                        }}
+                        style={styles.dropdownItem}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.dropdownItemText}>{tool.name}</Text>
+                        <Text style={styles.dropdownItemSub}>
+                          Kode: {tool.code}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
                 </View>
-                {details.identity ? (
-                  <Text style={styles.detail}>Identitas: {details.identity}</Text>
-                ) : null}
-                <Text style={styles.detail}>Alat: {details.tool}</Text>
-                <Text style={styles.detail}>Jumlah: {details.quantity}</Text>
-                {details.loanDate ? (
-                  <Text style={styles.detail}>
-                    Tanggal pinjam: {details.loanDate}
+              ) : null}
+
+              {/* Nama Peminjam */}
+              <Text style={styles.inputLabel}>Nama Peminjam *</Text>
+              <TextInput
+                value={borrowerName}
+                onChangeText={setBorrowerName}
+                placeholder="Contoh: Budi Santoso"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+              />
+
+              {/* No. HP / WhatsApp / Divisi */}
+              <Text style={styles.inputLabel}>No. HP / WhatsApp / Divisi</Text>
+              <TextInput
+                value={phoneDivisi}
+                onChangeText={setPhoneDivisi}
+                placeholder="Contoh: 081234567890 atau Divisi IT"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+              />
+
+              {/* Keperluan Peminjaman */}
+              <Text style={styles.inputLabel}>Keperluan Peminjaman</Text>
+              <TextInput
+                value={purpose}
+                onChangeText={setPurpose}
+                placeholder="Contoh: Presentasi Rapat Kerja Bulanan"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+              />
+
+              {/* Tanggal Pinjam */}
+              <Text style={styles.inputLabel}>
+                Tanggal Pinjam (YYYY-MM-DD) *
+              </Text>
+              <TextInput
+                value={loanDate}
+                onChangeText={setLoanDate}
+                placeholder="2026-11-11"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+              />
+              <Text style={styles.helperText}>
+                Format: Tahun-Bulan-Tanggal (Contoh: 2026-11-11)
+              </Text>
+
+              {/* Rencana Tanggal Pengembalian */}
+              <Text style={styles.inputLabel}>
+                Rencana Tanggal Pengembalian (YYYY-MM-DD) *
+              </Text>
+              <TextInput
+                value={expectedReturnDate}
+                onChangeText={setExpectedReturnDate}
+                placeholder="2026-11-14"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+              />
+              <Text style={styles.helperText}>
+                Perkiraan alat dikembalikan ke gudang/inventaris
+              </Text>
+
+              {/* Submit Button */}
+              <Pressable
+                onPress={handleSubmit}
+                disabled={submitting}
+                style={[
+                  styles.submitButton,
+                  submitting && styles.submitButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Konfirmasi dan Catat Peminjaman"
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>
+                    ✓ Konfirmasi & Catat Peminjaman
                   </Text>
-                ) : null}
-              </View>
-            );
-          })}
+                )}
+              </Pressable>
+            </View>
+          ) : (
+            /* Tab 2: Daftar Pinjaman */
+            <View style={styles.loanListContainer}>
+              {loading ? (
+                <View style={styles.emptyBox}>
+                  <ActivityIndicator color="#2563EB" />
+                  <Text style={[styles.emptyBoxText, { marginTop: 8 }]}>
+                    Memuat daftar pinjaman...
+                  </Text>
+                </View>
+              ) : activeLoans.length === 0 ? (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyBoxText}>
+                    Belum ada peminjaman aktif saat ini.
+                  </Text>
+                </View>
+              ) : (
+                activeLoans.map((loan) => (
+                  <View key={loan.id} style={styles.loanCard}>
+                    <View style={styles.loanCardHeader}>
+                      <Text style={styles.borrowerName}>
+                        {loan.namaPeminjam || loan.peminjam}
+                      </Text>
+                      <View style={styles.statusBadge}>
+                        <Text style={styles.statusText}>Dipinjam</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.loanDetailRow}>
+                      Alat:{" "}
+                      <Text style={styles.loanDetailBold}>
+                        {loan.namaAlat} ({loan.kodeAlat})
+                      </Text>
+                    </Text>
+
+                    {loan.telepon ? (
+                      <Text style={styles.loanDetailRow}>
+                        Kontak / Divisi: {loan.telepon}
+                      </Text>
+                    ) : null}
+
+                    {loan.keperluan ? (
+                      <Text style={styles.loanDetailRow}>
+                        Keperluan: {loan.keperluan}
+                      </Text>
+                    ) : null}
+
+                    <Text style={styles.loanDetailRow}>
+                      Pinjam: {loan.tanggalPinjam} | Rencana Kembali:{" "}
+                      {loan.rencanaKembali}
+                    </Text>
+
+                    <Pressable
+                      onPress={() => handleReturnLoan(loan)}
+                      style={styles.actionReturnBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Kembalikan Alat Ini"
+                    >
+                      <Text style={styles.actionReturnText}>
+                        Kembalikan Alat
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
         </View>
-      )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
